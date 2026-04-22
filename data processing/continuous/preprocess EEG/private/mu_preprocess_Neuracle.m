@@ -12,7 +12,7 @@ mu.parsestruct(opts);
 
 %% Data loading
 % convert ROOTPATH to char
-ROOTPATH = char(ROOTPATH);
+ROOTPATH = char(ROOTPATH); 
 if ~strcmp(ROOTPATH(end), '\')
     ROOTPATH = [ROOTPATH, '\'];
 end
@@ -62,7 +62,7 @@ if exist("trialsData", "var") && exist("rules", "var")
     exIdx = ismember(codes, [1; 2; 3]) | isnan(codes) | ~ismember(codes, rules.code) | latency > size(EEG.data, 2) - fix(window(2) / 1000 * fs);
     codes(exIdx) = [];
     latency(exIdx) = [];
-
+    
     % For EEG-App latest version
     if isfield(trialAll, "events")
         % validate
@@ -185,6 +185,7 @@ end
 
 % convert latency to time, unit: sec
 latency = latency / fs;
+trialAll = trialAll(1:length(latency));
 trialAll = mu.addfield(trialAll, "latency", latency);
 
 return;

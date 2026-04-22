@@ -55,6 +55,17 @@ elseif EEGPos.name == "Neuracle64"
                {'conv'     }, {'on'}                               , ... % plot radius just covers maximum channel radius
                {'colormap' }, {flipud(slanCM('RdYlBu'))}           , ... % colormap
                marker];
+elseif EEGPos.name == "Neuracle32"
+    % reset location
+    EEGPos.locs = readlocs('Neuracle_chan32.loc');
+    params0 = [...
+               {'plotchans'}, {chs2Plot}                           , ... % indices of channels to plot
+               {'plotrad'  }, {0.64}                               , ... % plot radius
+               {'headrad'  }, {0.58}                               , ... % head radius
+               {'intrad'   }, {0.64}                               , ... % interpolate radius
+               {'conv'     }, {'on'}                               , ... % plot radius just covers maximum channel radius
+               {'colormap' }, {flipud(slanCM('RdYlBu'))}           , ... % colormap
+               marker];
 else
     error("Unsupported configuration");
 end

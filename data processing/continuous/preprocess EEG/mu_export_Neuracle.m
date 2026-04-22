@@ -1,4 +1,4 @@
-function mu_export_Neuracle(DATAROOTPATH, SAVEROOTPATH, pIDs, opts)
+    function mu_export_Neuracle(DATAROOTPATH, SAVEROOTPATH, pIDs, opts)
 % This script is for single-subject data processing.
 % But it can also be applied to batching.
 % The only difference is the setting of data paths.
@@ -77,17 +77,17 @@ end
 %%% -------------Bad channel numbers in your recording--------------------
 % This setting may influence your ICA result. Be cautious
 % opts.badChs = []; % usually it is set empty for none of bad channels
-opts.badChs = 60:64; % for Neuracle 64-channel system
+opts.badChs = []; % for Neuracle 64-channel system
 
 %%% ---------EEG Postion that defines the grid map for plotting the wave in actual topography---------
 % Location file is usually paired with EEG position function
 % You can find these functions in 'EEGProcess\config\'
 
 % ----For Neuracle 32-channel system----
-% opts.EEGPos = EEGPos_Neuracle32();
+opts.EEGPos = EEGPos_Neuracle32();
 
 % ----For Neuracle 64-channel system----
-opts.EEGPos = EEGPos_Neuracle64();
+% opts.EEGPos = EEGPos_Neuracle64();
 
 %%% -----------You can also specify other parameters by assigning it as a field to [opts]----------------
 % See private\EEGPreprocessNeuracle.m for other parameters
