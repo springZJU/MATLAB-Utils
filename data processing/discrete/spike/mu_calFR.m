@@ -15,7 +15,7 @@ switch class(trials)
 
         fr = sum(trials >= windowFR(1) & trials <= windowFR(2)) / diff(windowFR) * 1000;
     case 'cell'
-        if any(~cellfun(@isvector, trials))
+        if any(~cellfun(@isvector, trials)&~cellfun(@isempty, trials)) 
             error("All trial spike data should be a vector. Please select spike data from one cluster.");
         end
 
