@@ -59,7 +59,7 @@ if exist("trialsData", "var") && exist("rules", "var")
     assert(codes(1) == 1, "Head information lost. Code should start with 1.");
     
     % exclude non-stimulus/cue codes
-    exIdx = ismember(codes, [1; 2; 3]) | isnan(codes) | ~ismember(codes, rules.code) | latency > size(EEG.data, 2) - fix(window(2) / 1000 * fs);
+    exIdx = ismember(codes, [1; 2; 3]) | isnan(codes) | ~ismember(codes, 255) | latency > size(EEG.data, 2) - fix(window(2) / 1000 * fs);
     codes(exIdx) = [];
     latency(exIdx) = [];
     
