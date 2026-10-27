@@ -30,22 +30,30 @@ function [contentBox, elementBoxes] = getContentBox(figHandle, opts)
 %
 %       'tightinset'
 %           For a tiledlayout root, measure the union of TightInset-expanded
-%           descendant axes, visible legend/colorbar descendants, and public
-%           tiledlayout text. For an axes root, measure Position expanded by
-%           TightInset.
+%           descendant axes, visible legend/colorbar descendants, colorbar
+%           labels, and public tiledlayout text. For axes roots, include each
+%           axes TightInset plus visible legend/colorbar boxes and colorbar
+%           labels.
 %
 %   Annotation
 %       false, default
-%           Do not draw diagnostic rectangles.
+%           Clear existing diagnostic rectangles and do not draw new ones.
 %
 %       true
-%           Draw one dashed rectangle per returned root and one thick red
-%           rectangle for the total content union. Internal axes inside a
-%           tiledlayout are never annotated individually.
+%           Replace existing diagnostics with dashed rectangles for each
+%           returned root and each legend/colorbar Position, a dotted box
+%           for a measurable colorbar Label in TightInset mode, and one thick
+%           red rectangle for the total content union. Internal axes inside
+%           a tiledlayout are never annotated individually.
+%
+%       'preserve'
+%           Keep existing diagnostic rectangles unchanged. Use this for
+%           auxiliary measurements that must not replace the currently
+%           displayed boundary during an iterative export.
 %
 % OUTPUT
 %   contentBox
-%       Union of the selected root boxes.
+%       Union of the selected root boxes and visible legend/colorbar boxes.
 %
 %   elementBoxes
 %       Structure with fields:
@@ -57,6 +65,8 @@ function [contentBox, elementBoxes] = getContentBox(figHandle, opts)
 %           byType
 %           typeUnion
 %           typeNames
+%           decorations (raw positionBox, full box including colorbar tick
+%           labels, tightBox including the colorbar Label, and component boxes)
 %
 % Each item contains both:
 %
@@ -70,7 +80,7 @@ arguments
     figHandle         (1,1) matlab.ui.Figure
 
     opts.PositionType {mustBeMember(opts.PositionType, {'Position', 'TightInset', 'position', 'tightinset'})} = 'Position'
-    opts.Annotation   (1,1) logical = false
+    opts.Annotation = false
 end
 
 positionType = lower(validatestring( ...
@@ -79,8 +89,13 @@ positionType = lower(validatestring( ...
     mfilename, ...
     'PositionType'));
 
+annotationMode = local_parseAnnotationMode_(opts.Annotation);
+
 debugTag = 'mu.getContentBox.annotation';
-local_deleteAnnotations_(figHandle, debugTag);
+
+if ~strcmp(annotationMode, 'preserve')
+    local_deleteAnnotations_(figHandle, debugTag);
+end
 
 drawnow;
 
@@ -201,7 +216,25 @@ if isempty(items)
         'No valid Position or TightInset root box was measured.');
 end
 
+% Decorations are measured separately from transform roots. They still
+% contribute to the total content boundary, but are not added to items because
+% exportFigure2PDF transforms their positions with the owning axes.
+decorationItems = local_collectDecorationBoxes_(figHandle, allObjects);
 selectedBoxes = vertcat(items.box);
+
+for decorationIndex = 1:numel(decorationItems)
+    if strcmp(positionType, 'tightinset')
+        decorationBox = decorationItems(decorationIndex).tightBox;
+    else
+        decorationBox = decorationItems(decorationIndex).box;
+    end
+
+    if local_isValidBox_(decorationBox)
+        selectedBoxes(end + 1, :) = ... %#ok<AGROW>
+            reshape(double(decorationBox), 1, 4);
+    end
+end
+
 contentBox = local_unionBoxes_(selectedBoxes);
 
 typeNames = unique(string({items.type}), 'stable');
@@ -228,42 +261,580 @@ elementBoxes.byType = byType;
 elementBoxes.typeUnion = typeUnion;
 elementBoxes.typeNames = cellstr(typeNames);
 
-if opts.Annotation
-    local_deleteAnnotations_(figHandle, debugTag);
-    typeColors = lines(max(1, numel(typeNames)));
+% Keep legend and colorbar boxes available separately from transform roots.
+% `positionBox` is the raw graphics Position used by exportFigure2PDF.
+% `box` is the full decoration boundary: for colorbars it includes the bar
+% and its numeric tick labels. `tightBox` also includes a measurable Label.
+elementBoxes.decorations = decorationItems;
 
-    for itemIndex = 1:numel(items)
-        typeIndex = find( ...
-            typeNames == string(items(itemIndex).type), ...
-            1, ...
-            'first');
+elementBoxes.annotationAxes = [];
+elementBoxes.annotationHandles = gobjects(0, 1);
 
-        local_drawPixelBox_( ...
+switch annotationMode
+    case 'on'
+        annotationHandles = gobjects(0, 1);
+
+        decorationTypeNames = strings(1, 0);
+        if ~isempty(decorationItems)
+            decorationTypeNames = unique( ...
+                string({decorationItems.type}), 'stable');
+        end
+
+        typeColors = lines(max( ...
+            1, numel(typeNames) + numel(decorationTypeNames)));
+
+        % Draw measurement-root boxes.
+        for itemIndex = 1:numel(items)
+            typeIndex = find( ...
+                typeNames == string(items(itemIndex).type), ...
+                1, ...
+                'first');
+
+            annotationHandle = local_drawPixelBox_( ...
+                figHandle, ...
+                items(itemIndex).box, ...
+                typeColors(typeIndex, :), ...
+                '--', ...
+                0.5, ...
+                debugTag, ...
+                sprintf('%s %s: %s', ...
+                    positionType, ...
+                    items(itemIndex).type, ...
+                    items(itemIndex).subtype));
+
+            if ~isempty(annotationHandle) && isgraphics(annotationHandle)
+                annotationHandles(end + 1, 1) = ... %#ok<AGROW>
+                    annotationHandle;
+            end
+        end
+
+        % Draw each full legend/colorbar box. For colorbars, this includes the
+        % numeric tick labels. In TightInset mode, draw the separate public
+        % Label extent with a dotted line as well.
+        for decorationIndex = 1:numel(decorationItems)
+            decorationTypeIndex = find( ...
+                decorationTypeNames == ...
+                    string(decorationItems(decorationIndex).type), ...
+                1, ...
+                'first');
+            colorIndex = numel(typeNames) + decorationTypeIndex;
+            decorationColor = typeColors(colorIndex, :);
+
+            annotationHandle = local_drawPixelBox_( ...
+                figHandle, ...
+                decorationItems(decorationIndex).box, ...
+                decorationColor, ...
+                '--', ...
+                0.5, ...
+                debugTag, ...
+                sprintf('%s %s full box', ...
+                    positionType, ...
+                    decorationItems(decorationIndex).type));
+
+            if ~isempty(annotationHandle) && isgraphics(annotationHandle)
+                annotationHandles(end + 1, 1) = ... %#ok<AGROW>
+                    annotationHandle;
+            end
+
+            if strcmp(positionType, 'tightinset') && ...
+                    local_isValidBox_( ...
+                        decorationItems(decorationIndex).labelBox)
+                annotationHandle = local_drawPixelBox_( ...
+                    figHandle, ...
+                    decorationItems(decorationIndex).labelBox, ...
+                    decorationColor, ...
+                    ':', ...
+                    0.75, ...
+                    debugTag, ...
+                    'colorbar Label extent');
+
+                if ~isempty(annotationHandle) && isgraphics(annotationHandle)
+                    annotationHandles(end + 1, 1) = ... %#ok<AGROW>
+                        annotationHandle;
+                end
+            end
+        end
+
+        annotationHandle = local_drawPixelBox_( ...
             figHandle, ...
-            items(itemIndex).box, ...
-            typeColors(typeIndex, :), ...
-            '--', ...
-            1.5, ...
+            contentBox, ...
+            [1, 0, 0], ...
+            '-', ...
+            1, ...
             debugTag, ...
-            sprintf('%s %s: %s', ...
-                positionType, ...
-                items(itemIndex).type, ...
-                items(itemIndex).subtype));
+            sprintf('total %s box', positionType));
+
+        if ~isempty(annotationHandle) && isgraphics(annotationHandle)
+            annotationHandles(end + 1, 1) = annotationHandle;
+        end
+
+        elementBoxes.annotationHandles = annotationHandles;
+        drawnow;
+
+    case 'preserve'
+        elementBoxes.annotationHandles = ...
+            findall(figHandle, 'Tag', debugTag);
+        elementBoxes.annotationHandles = ...
+            elementBoxes.annotationHandles(:);
+
+    otherwise
+        % Annotation mode 'off': old diagnostics were already removed.
+end
+
+end
+
+function decorationItems = ...
+        local_collectDecorationBoxes_(figHandle, allObjects)
+%LOCAL_COLLECTDECORATIONBOXES_ Collect full legend/colorbar boundaries.
+%
+% positionBox is the object's actual Position and is used when transforming
+% graphics objects. For a colorbar, box additionally includes the rendered
+% numeric tick-label region, and tightBox additionally includes the public
+% colorbar Label. All boxes use figure-relative pixels.
+
+decorationItems = struct( ...
+    'handle', {}, ...
+    'type', {}, ...
+    'positionBox', {}, ...
+    'box', {}, ...
+    'tightBox', {}, ...
+    'tickLabelBox', {}, ...
+    'tickLabels', {}, ...
+    'labelHandle', {}, ...
+    'labelBox', {});
+
+for objectIndex = 1:numel(allObjects)
+    objectHandle = allObjects(objectIndex);
+
+    if ~local_isDecoration_(objectHandle) || ...
+            ~local_isVisibleObject_(objectHandle) || ...
+            ~isprop(objectHandle, 'Position') || ...
+            ~isprop(objectHandle, 'Units')
+        continue;
     end
 
-    local_drawPixelBox_( ...
-        figHandle, ...
-        contentBox, ...
-        [1, 0, 0], ...
-        '-', ...
-        2.5, ...
-        debugTag, ...
-        sprintf('total %s box', positionType));
+    className = lower(class(objectHandle));
 
-    drawnow;
+    if contains(className, 'colorbar')
+        typeName = 'colorbar';
+    elseif contains(className, 'legend')
+        typeName = 'legend';
+    else
+        continue;
+    end
+
+    [positionBox, positionSuccess] = ...
+        local_getGenericAbsolutePositionBox_(objectHandle, figHandle);
+
+    if ~positionSuccess
+        continue;
+    end
+
+    box = reshape(double(positionBox), 1, 4);
+    tightBox = box;
+    tickLabelBox = nan(1, 4);
+    tickLabels = strings(0, 1);
+    labelHandle = [];
+    labelBox = nan(1, 4);
+
+    if strcmp(typeName, 'colorbar')
+        [tickLabelBox, tickLabelSuccess, tickLabels] = ...
+            local_getColorbarTickLabelBox_( ...
+                objectHandle, figHandle, positionBox);
+
+        if tickLabelSuccess
+            box = local_unionBoxes_([box; tickLabelBox]);
+            tightBox = box;
+        end
+
+        [labelBox, labelSuccess, labelHandle] = ...
+            local_getColorbarLabelBox_(objectHandle, figHandle);
+
+        if labelSuccess
+            tightBox = local_unionBoxes_([tightBox; labelBox]);
+        end
+    end
+
+    decorationItems(end + 1) = struct( ... %#ok<AGROW>
+        'handle', objectHandle, ...
+        'type', typeName, ...
+        'positionBox', reshape(double(positionBox), 1, 4), ...
+        'box', reshape(double(box), 1, 4), ...
+        'tightBox', reshape(double(tightBox), 1, 4), ...
+        'tickLabelBox', reshape(double(tickLabelBox), 1, 4), ...
+        'tickLabels', tickLabels, ...
+        'labelHandle', labelHandle, ...
+        'labelBox', reshape(double(labelBox), 1, 4));
 end
 
 end
+
+
+function [tickLabelBox, success, tickLabels] = ...
+        local_getColorbarTickLabelBox_(colorbarHandle, figHandle, positionBox)
+%LOCAL_GETCOLORBARTICKLABELBOX_ Estimate the full rendered numeric label box.
+%
+% ColorBar numeric tick labels are generally drawn by its ruler and are not
+% exposed as ordinary Text children. Measure the actual TickLabels strings
+% with a temporary text object using the colorbar's font settings, then
+% place a conservative label envelope outside the bar based on orientation
+% and Location. The temporary measurement axes is deleted before returning.
+
+tickLabelBox = nan(1, 4);
+success = false;
+tickLabels = local_getColorbarTickLabels_(colorbarHandle);
+
+if isempty(tickLabels)
+    return;
+end
+
+[maxTextWidthPx, maxTextHeightPx, measureSuccess] = ...
+    local_measureColorbarTickLabelsPx_( ...
+        colorbarHandle, figHandle, tickLabels);
+
+if ~measureSuccess || ...
+        any(~isfinite(positionBox)) || ...
+        any(positionBox(3:4) <= 0)
+    return;
+end
+
+orientation = 'vertical';
+if isprop(colorbarHandle, 'Orientation')
+    try
+        orientation = lower(char(string(colorbarHandle.Orientation)));
+    catch
+    end
+elseif positionBox(3) > positionBox(4)
+    orientation = 'horizontal';
+end
+
+location = '';
+if isprop(colorbarHandle, 'Location')
+    try
+        location = lower(char(string(colorbarHandle.Location)));
+    catch
+    end
+end
+
+fontSizePx = local_getColorbarFontSizePx_(colorbarHandle, figHandle, positionBox);
+gapPx = max(3, 0.25 * fontSizePx);
+
+if contains(orientation, 'vertical')
+    tickSide = local_getColorbarTickLabelSide_( ...
+        colorbarHandle, figHandle, positionBox, location, 'vertical');
+
+    labelHeight = maxTextHeightPx;
+    labelWidth = maxTextWidthPx;
+
+    if strcmp(tickSide, 'left')
+        labelLeft = positionBox(1) - gapPx - labelWidth;
+    else
+        labelLeft = positionBox(1) + positionBox(3) + gapPx;
+    end
+
+    tickLabelBox = [ ...
+        labelLeft, ...
+        positionBox(2) - labelHeight / 2, ...
+        labelWidth, ...
+        positionBox(4) + labelHeight];
+else
+    tickSide = local_getColorbarTickLabelSide_( ...
+        colorbarHandle, figHandle, positionBox, location, 'horizontal');
+
+    labelWidth = maxTextWidthPx;
+    labelHeight = maxTextHeightPx;
+
+    if strcmp(tickSide, 'above')
+        labelBottom = positionBox(2) + positionBox(4) + gapPx;
+    else
+        labelBottom = positionBox(2) - gapPx - labelHeight;
+    end
+
+    tickLabelBox = [ ...
+        positionBox(1) - labelWidth / 2, ...
+        labelBottom, ...
+        positionBox(3) + labelWidth, ...
+        labelHeight];
+end
+
+% A small pad protects anti-aliased glyph edges and minor ruler spacing
+% differences between screen rendering and export rendering.
+padPx = 1;
+tickLabelBox = [ ...
+    tickLabelBox(1) - padPx, ...
+    tickLabelBox(2) - padPx, ...
+    tickLabelBox(3) + 2 * padPx, ...
+    tickLabelBox(4) + 2 * padPx];
+
+success = local_isValidBox_(tickLabelBox);
+
+end
+
+
+function tickLabels = local_getColorbarTickLabels_(colorbarHandle)
+%LOCAL_GETCOLORBARTICKLABELS_ Read rendered tick strings when available.
+
+tickLabels = strings(0, 1);
+
+if isprop(colorbarHandle, 'TickLabels')
+    try
+        rawLabels = colorbarHandle.TickLabels;
+
+        if ischar(rawLabels)
+            tickLabels = string(cellstr(rawLabels));
+        elseif iscell(rawLabels)
+            tickLabels = string(rawLabels(:));
+        elseif isstring(rawLabels)
+            tickLabels = rawLabels(:);
+        elseif isnumeric(rawLabels)
+            tickLabels = string(rawLabels(:));
+        end
+
+        tickLabels = strtrim(tickLabels(:));
+        tickLabels = tickLabels(strlength(tickLabels) > 0);
+    catch
+        tickLabels = strings(0, 1);
+    end
+end
+
+% Some releases expose generated labels only when TickLabelsMode is 'auto'.
+% In that case, use the current tick values as a conservative fallback.
+if isempty(tickLabels) && ...
+        isprop(colorbarHandle, 'TickLabelsMode') && ...
+        isprop(colorbarHandle, 'Ticks')
+    try
+        labelsMode = lower(char(string(colorbarHandle.TickLabelsMode)));
+        if strcmp(labelsMode, 'auto')
+            tickValues = double(colorbarHandle.Ticks(:));
+            tickValues = tickValues(isfinite(tickValues));
+            tickLabels = compose('%.6g', tickValues);
+        end
+    catch
+        tickLabels = strings(0, 1);
+    end
+end
+
+end
+
+
+function [maxWidthPx, maxHeightPx, success] = ...
+        local_measureColorbarTickLabelsPx_(colorbarHandle, figHandle, tickLabels)
+%LOCAL_MEASURECOLORBARTICKLABELSPX_ Measure label strings using MATLAB text.
+
+maxWidthPx = nan;
+maxHeightPx = nan;
+success = false;
+
+try
+    figureSize = local_getFigureSizePx_(figHandle);
+    currentAxes = figHandle.CurrentAxes;
+catch
+    figureSize = [800, 600];
+    currentAxes = [];
+end
+
+measureAxes = [];
+textHandle = [];
+
+try
+    measureAxes = axes( ...
+        'Parent', figHandle, ...
+        'Units', 'pixels', ...
+        'Position', [1, 1, max(figureSize(1), 200), max(figureSize(2), 200)], ...
+        'Visible', 'off', ...
+        'HandleVisibility', 'off', ...
+        'Tag', 'mu.getContentBox.measurement');
+
+    textProperties = { ...
+        'Parent', measureAxes, ...
+        'Units', 'pixels', ...
+        'Position', [2, 2, 0], ...
+        'Visible', 'on', ...
+        'Clipping', 'off'};
+
+    if isprop(colorbarHandle, 'FontName')
+        textProperties(end + 1:end + 2) = ...
+            {'FontName', colorbarHandle.FontName};
+    end
+    % Set FontUnits before FontSize so MATLAB interprets FontSize in the
+    % same unit system as the source colorbar.
+    if isprop(colorbarHandle, 'FontUnits')
+        textProperties(end + 1:end + 2) = ...
+            {'FontUnits', colorbarHandle.FontUnits};
+    end
+    if isprop(colorbarHandle, 'FontSize')
+        textProperties(end + 1:end + 2) = ...
+            {'FontSize', colorbarHandle.FontSize};
+    end
+    if isprop(colorbarHandle, 'FontWeight')
+        textProperties(end + 1:end + 2) = ...
+            {'FontWeight', colorbarHandle.FontWeight};
+    end
+    if isprop(colorbarHandle, 'FontAngle')
+        textProperties(end + 1:end + 2) = ...
+            {'FontAngle', colorbarHandle.FontAngle};
+    end
+    if isprop(colorbarHandle, 'TickLabelInterpreter')
+        textProperties(end + 1:end + 2) = ...
+            {'Interpreter', colorbarHandle.TickLabelInterpreter};
+    end
+
+    textHandle = text(textProperties{:}, 'String', '0');
+
+    maxWidthPx = 0;
+    maxHeightPx = 0;
+
+    for labelIndex = 1:numel(tickLabels)
+        textHandle.String = char(tickLabels(labelIndex));
+        drawnow;
+
+        extentPx = reshape(double(textHandle.Extent), 1, 4);
+
+        if numel(extentPx) ~= 4 || ...
+                any(~isfinite(extentPx)) || ...
+                any(extentPx(3:4) <= 0)
+            continue;
+        end
+
+        maxWidthPx = max(maxWidthPx, extentPx(3));
+        maxHeightPx = max(maxHeightPx, extentPx(4));
+    end
+
+    success = isfinite(maxWidthPx) && isfinite(maxHeightPx) && ...
+        maxWidthPx > 0 && maxHeightPx > 0;
+catch
+    success = false;
+end
+
+% Remove the temporary measurement axes immediately and restore CurrentAxes.
+if ~isempty(measureAxes) && isgraphics(measureAxes)
+    try
+        delete(measureAxes);
+    catch
+    end
+end
+
+if ~isempty(currentAxes) && isgraphics(currentAxes)
+    try
+        figHandle.CurrentAxes = currentAxes;
+    catch
+    end
+end
+
+end
+
+
+function fontSizePx = local_getColorbarFontSizePx_( ...
+        colorbarHandle, figHandle, positionBox)
+%LOCAL_GETCOLORBARFONTSIZEPX_ Estimate the displayed font size in pixels.
+
+fontSizePx = 12;
+
+try
+    if isprop(colorbarHandle, 'FontSize')
+        fontSizeValue = double(colorbarHandle.FontSize);
+    else
+        fontSizeValue = 9;
+    end
+
+    fontUnits = 'points';
+    if isprop(colorbarHandle, 'FontUnits')
+        fontUnits = lower(char(string(colorbarHandle.FontUnits)));
+    end
+
+    screenPpi = double(get(groot, 'ScreenPixelsPerInch'));
+    if ~isfinite(screenPpi) || screenPpi <= 0
+        screenPpi = 96;
+    end
+
+    switch fontUnits
+        case 'pixels'
+            fontSizePx = fontSizeValue;
+        case 'inches'
+            fontSizePx = fontSizeValue * screenPpi;
+        case 'centimeters'
+            fontSizePx = fontSizeValue * screenPpi / 2.54;
+        case 'normalized'
+            fontSizePx = fontSizeValue * max(1, min(positionBox(3:4)));
+        otherwise
+            fontSizePx = fontSizeValue * screenPpi / 72;
+    end
+catch
+    fontSizePx = 12;
+end
+
+fontSizePx = max(1, fontSizePx);
+
+end
+
+
+function tickSide = local_getColorbarTickLabelSide_( ...
+        colorbarHandle, figHandle, positionBox, location, orientation)
+%LOCAL_GETCOLORBARTICKLABELSIDE_ Infer which side contains numeric labels.
+
+if strcmp(orientation, 'vertical')
+    if contains(location, 'west')
+        tickSide = 'left';
+        return;
+    elseif contains(location, 'east')
+        tickSide = 'right';
+        return;
+    end
+else
+    if contains(location, 'north')
+        tickSide = 'above';
+        return;
+    elseif contains(location, 'south')
+        tickSide = 'below';
+        return;
+    end
+end
+
+% For manually positioned colorbars, compare the colorbar to its owner axes.
+ownerAxes = [];
+if isprop(colorbarHandle, 'Axes')
+    try
+        ownerAxes = colorbarHandle.Axes;
+    catch
+    end
+end
+
+if ~isempty(ownerAxes) && isgraphics(ownerAxes)
+    [ownerBox, ownerSuccess] = ...
+        local_getGenericAbsolutePositionBox_(ownerAxes, figHandle);
+else
+    ownerBox = nan(1, 4);
+    ownerSuccess = false;
+end
+
+if ownerSuccess
+    if strcmp(orientation, 'vertical')
+        colorbarCenter = positionBox(1) + positionBox(3) / 2;
+        ownerCenter = ownerBox(1) + ownerBox(3) / 2;
+        if colorbarCenter < ownerCenter
+            tickSide = 'left';
+        else
+            tickSide = 'right';
+        end
+    else
+        colorbarCenter = positionBox(2) + positionBox(4) / 2;
+        ownerCenter = ownerBox(2) + ownerBox(4) / 2;
+        if colorbarCenter > ownerCenter
+            tickSide = 'above';
+        else
+            tickSide = 'below';
+        end
+    end
+else
+    if strcmp(orientation, 'vertical')
+        tickSide = 'right';
+    else
+        tickSide = 'below';
+    end
+end
+
+end
+
 
 function [positionBox, success] = ...
         local_getRootPositionBox_(rootHandle, figHandle)
@@ -511,8 +1082,7 @@ for objectIndex = 1:numel(descendants)
     elseif local_isDecoration_(objectHandle) && ...
             local_isVisibleObject_(objectHandle)
         [decorationBox, decorationSuccess] = ...
-            local_getGenericAbsolutePositionBox_( ...
-                objectHandle, figHandle);
+            local_getDecorationTightBox_(objectHandle, figHandle);
 
         if decorationSuccess
             tightBoxes(end + 1, :) = decorationBox; 
@@ -625,6 +1195,129 @@ for propertyIndex = 1:numel(propertyNames)
 end
 
 end
+
+function [tightBox, success] = ...
+        local_getDecorationTightBox_(objectHandle, figHandle)
+%LOCAL_GETDECORATIONTIGHTBOX_ Include a colorbar Label when measurable.
+
+[tightBox, success] = ...
+    local_getGenericAbsolutePositionBox_(objectHandle, figHandle);
+
+if ~success || ~contains(lower(class(objectHandle)), 'colorbar')
+    return;
+end
+
+% Include the numeric tick labels in the colorbar's tight boundary, not just
+% the narrow color ramp rectangle.
+[tickLabelBox, tickLabelSuccess] = ...
+    local_getColorbarTickLabelBox_(objectHandle, figHandle, tightBox);
+
+if tickLabelSuccess
+    tightBox = local_unionBoxes_([tightBox; tickLabelBox]);
+end
+
+% The public ColorBar.Label is a separate text object and may extend farther
+% than both the color ramp and its numeric tick labels.
+[labelBox, labelSuccess] = ...
+    local_getColorbarLabelBox_(objectHandle, figHandle);
+
+if labelSuccess
+    tightBox = local_unionBoxes_([tightBox; labelBox]);
+end
+
+success = local_isValidBox_(tightBox);
+
+end
+
+
+function [labelBox, success, labelHandle] = ...
+        local_getColorbarLabelBox_(colorbarHandle, figHandle)
+%LOCAL_GETCOLORBARLABELBOX_ Measure a colorbar Label's rendered text extent.
+%
+% ColorBar does not expose a TightInset property. Its Label is a Text object;
+% temporarily switching the label's Units to pixels lets MATLAB report the
+% text Extent in the label parent's local pixel coordinates. The original
+% Units value is restored immediately and no DRAWNOW is issued while changed.
+
+labelBox = nan(1, 4);
+success = false;
+labelHandle = [];
+
+if ~isprop(colorbarHandle, 'Label')
+    return;
+end
+
+try
+    labelHandle = colorbarHandle.Label;
+catch
+    return;
+end
+
+if isempty(labelHandle) || ...
+        ~isgraphics(labelHandle) || ...
+        ~local_isVisibleObject_(labelHandle) || ...
+        ~local_hasTextContent_(labelHandle) || ...
+        ~isprop(labelHandle, 'Units') || ...
+        ~isprop(labelHandle, 'Extent')
+    return;
+end
+
+parentHandle = local_parent_(labelHandle);
+parentSuccess = false;
+parentBox = nan(1, 4);
+
+if ~isempty(parentHandle) && isgraphics(parentHandle)
+    [parentBox, parentSuccess] = ...
+        local_getGenericAbsolutePositionBox_(parentHandle, figHandle);
+end
+
+if ~parentSuccess
+    % Some MATLAB releases expose a non-container Label parent. In that
+    % case, use the ColorBar Position as the local pixel-coordinate origin.
+    [parentBox, parentSuccess] = ...
+        local_getGenericAbsolutePositionBox_(colorbarHandle, figHandle);
+end
+
+if ~parentSuccess
+    return;
+end
+
+try
+    originalUnits = labelHandle.Units;
+    cleanupObj = onCleanup(@() ...
+        local_restoreUnits_(labelHandle, originalUnits));
+
+    labelHandle.Units = 'pixels';
+    extentPx = reshape(double(labelHandle.Extent), 1, 4);
+
+    clear cleanupObj;
+catch
+    return;
+end
+
+if numel(extentPx) ~= 4 || ...
+        any(~isfinite(extentPx)) || ...
+        any(extentPx(3:4) <= 0)
+    return;
+end
+
+% Text Extent is parent-local when Units='pixels'. Convert it to the same
+% figure-relative pixel coordinates used by the decoration Position boxes.
+labelBox = [ ...
+    parentBox(1:2) + extentPx(1:2) - [1, 1], ...
+    extentPx(3:4)];
+
+% A one-pixel pad protects antialiased glyph edges during raster/PDF export.
+labelBox = [ ...
+    labelBox(1) - 1, ...
+    labelBox(2) - 1, ...
+    labelBox(3) + 2, ...
+    labelBox(4) + 2];
+
+success = local_isValidBox_(labelBox);
+
+end
+
 
 function [positionBox, success] = ...
         local_getGenericAbsolutePositionBox_(objectHandle, figHandle)
@@ -813,6 +1506,18 @@ tf = ...
     contains(className, '.toolbar.') || ...
     contains(className, 'matlab.graphics.shape.internal.');
 
+% Exclude the diagnostic overlay axes and its tagged children from future
+% measurement passes, so Annotation=true never changes the measured result.
+try
+    tagValue = char(string(objectHandle.Tag));
+
+    if strcmp(tagValue, 'mu.getContentBox.annotation') || ...
+            startsWith(tagValue, 'mu.getContentBox.annotation.')
+        tf = true;
+    end
+catch
+end
+
 end
 
 function parentHandle = local_parent_(objectHandle)
@@ -861,29 +1566,60 @@ boundaryBox = [ ...
 
 end
 
-function local_drawPixelBox_( ...
+function annotationMode = local_parseAnnotationMode_(value)
+%LOCAL_PARSEANNOTATIONMODE_ Parse logical and named annotation modes.
+
+if islogical(value) && isscalar(value)
+    if value
+        annotationMode = 'on';
+    else
+        annotationMode = 'off';
+    end
+    return;
+end
+
+if ischar(value) || (isstring(value) && isscalar(value))
+    annotationMode = lower(strtrim(char(string(value))));
+
+    if any(strcmp(annotationMode, {'on', 'off', 'preserve'}))
+        return;
+    end
+end
+
+error('getContentBox:InvalidAnnotationOption', ...
+    ['Annotation must be logical true/false or one of the text values ' ...
+     '''on'', ''off'', or ''preserve''.']);
+end
+
+
+function annotationHandle = local_drawPixelBox_( ...
         figHandle, rawBox, lineColor, lineStyle, lineWidth, ...
         debugTag, description)
-%LOCAL_DRAWPIXELBOX_ Draw a clipped figure-relative rectangle.
+%LOCAL_DRAWPIXELBOX_ Draw a clipped figure-relative annotation rectangle.
+%
+% This is the original annotation-object implementation. In particular, the
+% rectangle is a child of the figure's annotation layer, not a new overlay
+% axes, so it does not affect axes/layout measurement or CurrentAxes.
+
+annotationHandle = gobjects(0, 1);
 
 if ~local_isValidBox_(rawBox)
     return;
 end
 
-try
-    figurePosition = reshape( ...
-        double(getpixelposition(figHandle)), 1, 4);
-    figureSize = figurePosition(3:4);
-catch
-    originalUnits = figHandle.Units;
-    cleanupObj = onCleanup(@() ...
-        local_restoreUnits_(figHandle, originalUnits)); 
+figureSize = local_getFigureSizePx_(figHandle);
 
-    figHandle.Units = 'pixels';
-    figurePosition = reshape(double(figHandle.Position), 1, 4);
-    figureSize = figurePosition(3:4);
+if numel(figureSize) ~= 2 || ...
+        any(~isfinite(figureSize)) || ...
+        any(figureSize <= 0)
+    warning('getContentBox:AnnotationFigureSizeFailed', ...
+        'Could not determine the figure size for diagnostic annotations.');
+    return;
 end
 
+% Annotation Position in pixel units uses a figure-relative coordinate
+% system whose lower-left corner is [0, 0]. Clip diagnostic boxes to the
+% visible figure area, while retaining the unmodified box in UserData.
 leftValue = max(0, rawBox(1));
 bottomValue = max(0, rawBox(2));
 rightValue = min(figureSize(1), rawBox(1) + rawBox(3));
@@ -897,7 +1633,7 @@ displayBox = [ ...
 
 if displayBox(3) <= 0 || displayBox(4) <= 0
     warning('getContentBox:AnnotationOutsideFigure', ...
-        ['Measured root "%s" lies outside the visible figure. ' ...
+        ['Measured box "%s" lies outside the visible figure. ' ...
          'Raw box: [%s] pixels.'], ...
         description, ...
         strtrim(sprintf('%.12g ', rawBox)));
@@ -917,13 +1653,34 @@ annotationHandle.Units = 'pixels';
 annotationHandle.Position = displayBox;
 annotationHandle.UserData = struct( ...
     'description', description, ...
-    'rawBox', rawBox, ...
+    'rawBox', reshape(double(rawBox), 1, 4), ...
     'displayBox', displayBox);
 
 try
     annotationHandle.HitTest = 'off';
     annotationHandle.PickableParts = 'none';
 catch
+end
+
+end
+
+
+function figureSize = local_getFigureSizePx_(figHandle)
+%LOCAL_GETFIGURESIZEPX_ Return the figure client area size in pixels.
+
+figureSize = [nan, nan];
+
+try
+    figurePosition = reshape(double(getpixelposition(figHandle)), 1, 4);
+    figureSize = figurePosition(3:4);
+catch
+    originalUnits = figHandle.Units;
+    cleanupObj = onCleanup(@() ...
+        local_restoreUnits_(figHandle, originalUnits));
+
+    figHandle.Units = 'pixels';
+    figurePosition = reshape(double(figHandle.Position), 1, 4);
+    figureSize = figurePosition(3:4);
 end
 
 end

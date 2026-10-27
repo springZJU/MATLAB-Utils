@@ -58,7 +58,9 @@ function exportFigure2PDF(figHandle, outFile, widthMm, heightMm, opts)
 %       Default: 0.01.
 %
 %   debug
-%       true keeps the copied figure open and draws the final selected boxes.
+%       true shows the current measured boundary in the copied figure during
+%       adjustment, then keeps the figure open with the final boundary drawn.
+%       Diagnostic rectangles are cleared before PDF export.
 %       Default: false.
 
 arguments
@@ -93,6 +95,14 @@ adjustPositionType = lower(validatestring( ...
     {'Position', 'TightInset'}, ...
     mfilename, ...
     'adjustPositionType'));
+
+% Auxiliary geometry reads should not replace the diagnostic boundary shown
+% in the visible temporary figure.
+if opts.debug
+    annotationPreserveOption = 'preserve';
+else
+    annotationPreserveOption = false;
+end
 
 outFile = char(string(outFile));
 [folderPath, fileName, extension] = fileparts(outFile);
@@ -129,7 +139,7 @@ end
 % Update figure before copy
 drawnow;
 tempFig = copyobj(figHandle, groot);
-cleanupObj = onCleanup(@() delete(tempFig));
+cleanupObj = onCleanup(@() local_cleanupTempFigure_(tempFig, opts.debug));
 
 try
     tempFig.WindowState = 'normal';
@@ -208,7 +218,7 @@ end
 [initialBoundaryPx, initialElements] = mu.getContentBox( ...
     tempFig, ...
     'PositionType', adjustPositionType, ...
-    'Annotation', false);
+    'Annotation', opts.debug);
 
 rootItems = initialElements.items;
 rootHandles = gobjects(numel(rootItems), 1);
@@ -223,6 +233,74 @@ if ~local_isValidBox_(initialBoundaryPx)
     error('exportFigure2PDF:InvalidInitialBoundary', ...
         'The initial %s content boundary is invalid.', ...
         adjustPositionType);
+end
+
+% With axes roots, colorbars and legends may keep a fixed figure position
+% while the axes are transformed. If they remain layout-managed, repeatedly
+% changing only axes Position can make the axes collapse while decorations
+% stay in place. Freeze their locations and transform their rectangles using
+% the same affine mapping as the axes. For tiledlayout roots, decorations are
+% left under MATLAB's layout manager.
+decorationHandles = gobjects(0, 1);
+decorationTypes = strings(0, 1);
+initialDecorationPositionBoxesPx = zeros(0, 4);
+
+if strcmp(initialElements.rootMode, 'axes')
+    [~, initialPositionElements] = mu.getContentBox( ...
+        tempFig, ...
+        'PositionType', 'Position', ...
+        'Annotation', annotationPreserveOption);
+
+    [decorationHandles, decorationTypes, ...
+        initialDecorationPositionBoxesPx] = ...
+        local_getDecorationPositionBoxes_(initialPositionElements);
+
+    if ~isempty(decorationHandles)
+        local_setDecorationsManual_( ...
+            decorationHandles, decorationTypes);
+
+        drawnow;
+
+        % Restore the pre-lock geometry, since switching a legend/colorbar to
+        % manual placement can cause MATLAB to reflow its associated axes.
+        for rootIndex = 1:numel(rootHandles)
+            local_setAbsolutePositionBox_( ...
+                rootHandles(rootIndex), ...
+                initialPositionBoxesPx(rootIndex, :), ...
+                tempFig);
+        end
+
+        local_setDecorationPositionBoxes_( ...
+            decorationHandles, ...
+            initialDecorationPositionBoxesPx, ...
+            tempFig);
+
+        drawnow;
+
+        [initialBoundaryPx, initialElements] = mu.getContentBox( ...
+            tempFig, ...
+            'PositionType', adjustPositionType, ...
+            'Annotation', opts.debug);
+
+        initialPositionBoxesPx = ...
+            local_getPositionBoxesForHandles_( ...
+            rootHandles, initialElements);
+
+        [~, initialPositionElements] = mu.getContentBox( ...
+            tempFig, ...
+            'PositionType', 'Position', ...
+            'Annotation', annotationPreserveOption);
+
+        initialDecorationPositionBoxesPx = ...
+            local_getDecorationPositionBoxesForHandles_( ...
+            decorationHandles, initialPositionElements);
+
+        if ~local_isValidBox_(initialBoundaryPx)
+            error('exportFigure2PDF:InvalidInitialBoundary', ...
+                'The initial %s content boundary is invalid after locking decorations.', ...
+                adjustPositionType);
+        end
+    end
 end
 
 initialSizeMm = initialBoundaryPx(3:4) * mmPerPx;
@@ -278,6 +356,13 @@ for rootIndex = 1:numel(rootHandles)
         tempFig);
 end
 
+if ~isempty(decorationHandles)
+    local_setDecorationPositionBoxes_( ...
+        decorationHandles, ...
+        initialDecorationPositionBoxesPx, ...
+        tempFig);
+end
+
 drawnow;
 
 converged = false;
@@ -288,11 +373,24 @@ for iteration = 1:opts.maxIter
     [currentBoundaryPx, currentElements] = mu.getContentBox( ...
         tempFig, ...
         'PositionType', adjustPositionType, ...
-        'Annotation', false);
+        'Annotation', opts.debug);
 
     currentPositionBoxesPx = ...
         local_getPositionBoxesForHandles_( ...
         rootHandles, currentElements);
+
+    if ~isempty(decorationHandles)
+        [~, currentPositionElements] = mu.getContentBox( ...
+            tempFig, ...
+            'PositionType', 'Position', ...
+            'Annotation', annotationPreserveOption);
+
+        currentDecorationPositionBoxesPx = ...
+            local_getDecorationPositionBoxesForHandles_( ...
+            decorationHandles, currentPositionElements);
+    else
+        currentDecorationPositionBoxesPx = zeros(0, 4);
+    end
 
     scaleFactor = ...
         targetBoundaryPx(3:4) ./ ...
@@ -315,10 +413,24 @@ for iteration = 1:opts.maxIter
     targetPositionBoxesPx(:, 4) = ...
         currentPositionBoxesPx(:, 4) * scaleFactor(2);
 
+    targetDecorationPositionBoxesPx = ...
+        local_transformPositionBoxes_( ...
+        currentDecorationPositionBoxesPx, ...
+        currentBoundaryPx, ...
+        targetBoundaryPx, ...
+        scaleFactor);
+
     for rootIndex = 1:numel(rootHandles)
         local_setAbsolutePositionBox_( ...
             rootHandles(rootIndex), ...
             targetPositionBoxesPx(rootIndex, :), ...
+            tempFig);
+    end
+
+    if ~isempty(decorationHandles)
+        local_setDecorationPositionBoxes_( ...
+            decorationHandles, ...
+            targetDecorationPositionBoxesPx, ...
             tempFig);
     end
 
@@ -327,7 +439,7 @@ for iteration = 1:opts.maxIter
     [measuredBoundaryPx, measuredElements] = mu.getContentBox( ...
         tempFig, ...
         'PositionType', adjustPositionType, ...
-        'Annotation', false);
+        'Annotation', opts.debug);
 
     originCorrectionPx = ...
         targetBoundaryPx(1:2) - ...
@@ -337,6 +449,27 @@ for iteration = 1:opts.maxIter
         measuredPositionBoxesPx = ...
             local_getPositionBoxesForHandles_( ...
             rootHandles, measuredElements);
+
+        if ~isempty(decorationHandles)
+            [~, measuredPositionElements] = mu.getContentBox( ...
+                tempFig, ...
+                'PositionType', 'Position', ...
+                'Annotation', annotationPreserveOption);
+
+            measuredDecorationPositionBoxesPx = ...
+                local_getDecorationPositionBoxesForHandles_( ...
+                decorationHandles, measuredPositionElements);
+
+            measuredDecorationPositionBoxesPx(:, 1) = ...
+                measuredDecorationPositionBoxesPx(:, 1) + ...
+                originCorrectionPx(1);
+
+            measuredDecorationPositionBoxesPx(:, 2) = ...
+                measuredDecorationPositionBoxesPx(:, 2) + ...
+                originCorrectionPx(2);
+        else
+            measuredDecorationPositionBoxesPx = zeros(0, 4);
+        end
 
         measuredPositionBoxesPx(:, 1) = ...
             measuredPositionBoxesPx(:, 1) + ...
@@ -353,13 +486,20 @@ for iteration = 1:opts.maxIter
                 tempFig);
         end
 
+        if ~isempty(decorationHandles)
+            local_setDecorationPositionBoxes_( ...
+                decorationHandles, ...
+                measuredDecorationPositionBoxesPx, ...
+                tempFig);
+        end
+
         drawnow;
     end
 
     [finalBoundaryPx, finalElements] = mu.getContentBox( ...
         tempFig, ...
         'PositionType', adjustPositionType, ...
-        'Annotation', false);
+        'Annotation', opts.debug);
 
     boundaryDifferencePx = [ ...
         finalBoundaryPx(1:2) - targetBoundaryPx(1:2), ...
@@ -376,7 +516,7 @@ end
 [actualContentBoundaryPx, ~] = mu.getContentBox( ...
     tempFig, ...
     'PositionType', 'tightinset', ...
-    'Annotation', false);
+    'Annotation', annotationPreserveOption);
 
 contentShiftPx = [ ...
     max(0, workingMarginPx - actualContentBoundaryPx(1)), ...
@@ -386,6 +526,25 @@ if any(contentShiftPx > tolerancePx)
     finalPositionBoxesPx = ...
         local_getPositionBoxesForHandles_( ...
         rootHandles, finalElements);
+
+    if ~isempty(decorationHandles)
+        [~, finalPositionElements] = mu.getContentBox( ...
+            tempFig, ...
+            'PositionType', 'Position', ...
+            'Annotation', annotationPreserveOption);
+
+        finalDecorationPositionBoxesPx = ...
+            local_getDecorationPositionBoxesForHandles_( ...
+            decorationHandles, finalPositionElements);
+
+        finalDecorationPositionBoxesPx(:, 1) = ...
+            finalDecorationPositionBoxesPx(:, 1) + contentShiftPx(1);
+
+        finalDecorationPositionBoxesPx(:, 2) = ...
+            finalDecorationPositionBoxesPx(:, 2) + contentShiftPx(2);
+    else
+        finalDecorationPositionBoxesPx = zeros(0, 4);
+    end
 
     finalPositionBoxesPx(:, 1) = ...
         finalPositionBoxesPx(:, 1) + contentShiftPx(1);
@@ -400,17 +559,24 @@ if any(contentShiftPx > tolerancePx)
             tempFig);
     end
 
+    if ~isempty(decorationHandles)
+        local_setDecorationPositionBoxes_( ...
+            decorationHandles, ...
+            finalDecorationPositionBoxesPx, ...
+            tempFig);
+    end
+
     drawnow;
 
     [finalBoundaryPx, finalElements] = mu.getContentBox( ...
         tempFig, ...
         'PositionType', adjustPositionType, ...
-        'Annotation', false);
+        'Annotation', opts.debug);
 
     [actualContentBoundaryPx, ~] = mu.getContentBox( ...
         tempFig, ...
         'PositionType', 'tightinset', ...
-        'Annotation', false);
+        'Annotation', annotationPreserveOption);
 end
 
 requiredFigureSizePx = [ ...
@@ -426,6 +592,19 @@ if any(requiredFigureSizePx > currentFigureSizePx)
         local_getPositionBoxesForHandles_( ...
         rootHandles, finalElements);
 
+    if ~isempty(decorationHandles)
+        [~, finalPositionElements] = mu.getContentBox( ...
+            tempFig, ...
+            'PositionType', 'Position', ...
+            'Annotation', annotationPreserveOption);
+
+        finalDecorationPositionBoxesPx = ...
+            local_getDecorationPositionBoxesForHandles_( ...
+            decorationHandles, finalPositionElements);
+    else
+        finalDecorationPositionBoxesPx = zeros(0, 4);
+    end
+
     local_setFigureSizePx_( ...
         tempFig, ...
         max(currentFigureSizePx, requiredFigureSizePx));
@@ -437,21 +616,28 @@ if any(requiredFigureSizePx > currentFigureSizePx)
             tempFig);
     end
 
+    if ~isempty(decorationHandles)
+        local_setDecorationPositionBoxes_( ...
+            decorationHandles, ...
+            finalDecorationPositionBoxesPx, ...
+            tempFig);
+    end
+
     drawnow;
 
     [finalBoundaryPx, finalElements] = mu.getContentBox( ...
         tempFig, ...
         'PositionType', adjustPositionType, ...
-        'Annotation', false);
+        'Annotation', opts.debug);
 
     [actualContentBoundaryPx, ~] = mu.getContentBox( ...
         tempFig, ...
         'PositionType', 'tightinset', ...
-        'Annotation', false);
+        'Annotation', annotationPreserveOption);
 end
 
-% Delete diagnostics only. Public tiledlayout text is never removed or
-% modified.
+% Clear diagnostic rectangles before export so they never enter the PDF.
+% Public tiledlayout text is never removed or modified.
 mu.getContentBox( ...
     tempFig, ...
     'PositionType', adjustPositionType, ...
@@ -484,6 +670,7 @@ fprintf('adjustPositionType: %s\n', adjustPositionType);
 fprintf('expandMode: %s\n', expandMode);
 fprintf('Root mode: %s\n', finalElements.rootMode);
 fprintf('Adjusted roots: %d\n', numel(rootHandles));
+fprintf('Adjusted legends/colorbars: %d\n', numel(decorationHandles));
 fprintf('Iterations: %d\n', iteration);
 fprintf('Converged: %d\n', converged);
 fprintf('Target %s-box size: %.6g x %.6g mm\n', ...
@@ -535,6 +722,235 @@ for rootIndex = 1:numel(rootHandles)
 end
 
 end
+
+
+function [decorationHandles, decorationTypes, positionBoxesPx] = ...
+        local_getDecorationPositionBoxes_(elementBoxes)
+%LOCAL_GETDECORATIONPOSITIONBOXES_ Read raw Position boxes for decorations.
+
+arguments
+    elementBoxes (1,1) struct
+end
+
+decorationHandles = gobjects(0, 1);
+decorationTypes = strings(0, 1);
+positionBoxesPx = zeros(0, 4);
+
+% Older getContentBox revisions may not expose a decorations field.
+% Treat that schema as having no separately measurable decorations rather
+% than failing before export begins.
+if ~isfield(elementBoxes, 'decorations') || ...
+        isempty(elementBoxes.decorations)
+    return;
+end
+
+decorationItems = elementBoxes.decorations;
+
+validMask = false(numel(decorationItems), 1);
+
+for decorationIndex = 1:numel(decorationItems)
+    decorationHandle = decorationItems(decorationIndex).handle;
+
+    validMask(decorationIndex) = ...
+        isgraphics(decorationHandle) && ...
+        isprop(decorationHandle, 'Position') && ...
+        isprop(decorationHandle, 'Units');
+end
+
+decorationItems = decorationItems(validMask);
+
+decorationHandles = gobjects(numel(decorationItems), 1);
+decorationTypes = strings(numel(decorationItems), 1);
+positionBoxesPx = nan(numel(decorationItems), 4);
+
+for decorationIndex = 1:numel(decorationItems)
+    decorationHandles(decorationIndex) = ...
+        decorationItems(decorationIndex).handle;
+
+    decorationTypes(decorationIndex) = ...
+        string(decorationItems(decorationIndex).type);
+
+    if isfield(decorationItems, 'positionBox')
+        rawPositionBox = decorationItems(decorationIndex).positionBox;
+    else
+        % Backward compatibility with getContentBox revisions that returned
+        % only the raw Position in the box field.
+        rawPositionBox = decorationItems(decorationIndex).box;
+    end
+
+    positionBoxesPx(decorationIndex, :) = ...
+        reshape(double(rawPositionBox), 1, 4);
+end
+
+if any(~isfinite(positionBoxesPx), 'all') || ...
+        any(positionBoxesPx(:, 3:4) <= 0, 'all')
+    error('exportFigure2PDF:InvalidDecorationPosition', ...
+        'A legend or colorbar has an invalid Position box.');
+end
+
+end
+
+
+function positionBoxesPx = ...
+        local_getDecorationPositionBoxesForHandles_( ...
+        decorationHandles, elementBoxes)
+%LOCAL_GETDECORATIONPOSITIONBOXESFORHANDLES_ Match decorations to raw boxes.
+
+arguments
+    decorationHandles
+    elementBoxes (1,1) struct
+end
+
+positionBoxesPx = nan(numel(decorationHandles), 4);
+
+if ~isfield(elementBoxes, 'decorations')
+    error('exportFigure2PDF:DecorationFieldMissing', ...
+        ['Decoration handles were collected, but elementBoxes does not ' ...
+         'contain a decorations field. Update mu.getContentBox.m so both ' ...
+         'functions use the same revision.']);
+end
+
+decorationItems = elementBoxes.decorations;
+
+for decorationIndex = 1:numel(decorationHandles)
+    matched = false;
+
+    for itemIndex = 1:numel(decorationItems)
+        if isequal( ...
+                decorationHandles(decorationIndex), ...
+                decorationItems(itemIndex).handle)
+            if isfield(decorationItems, 'positionBox')
+                rawPositionBox = decorationItems(itemIndex).positionBox;
+            else
+                rawPositionBox = decorationItems(itemIndex).box;
+            end
+
+            positionBoxesPx(decorationIndex, :) = ...
+                reshape(double(rawPositionBox), 1, 4);
+            matched = true;
+            break;
+        end
+    end
+
+    if ~matched
+        error('exportFigure2PDF:DecorationMatchingFailed', ...
+            ['A legend or colorbar could not be measured after layout ' ...
+             'reflow.']);
+    end
+end
+
+if any(~isfinite(positionBoxesPx), 'all') || ...
+        any(positionBoxesPx(:, 3:4) <= 0, 'all')
+    error('exportFigure2PDF:InvalidDecorationPosition', ...
+        'A legend or colorbar has an invalid Position box.');
+end
+
+end
+
+
+function local_setDecorationsManual_(decorationHandles, decorationTypes)
+%LOCAL_SETDECORATIONSMANUAL_ Disable automatic decoration placement.
+
+arguments
+    decorationHandles
+    decorationTypes (:,1) string
+end
+
+if numel(decorationHandles) ~= numel(decorationTypes)
+    error('exportFigure2PDF:DecorationTypeMismatch', ...
+        'Decoration handles and types must have the same number of elements.');
+end
+
+for decorationIndex = 1:numel(decorationHandles)
+    decorationHandle = decorationHandles(decorationIndex);
+
+    if ~isgraphics(decorationHandle) || ...
+            ~isprop(decorationHandle, 'Location')
+        continue;
+    end
+
+    switch lower(char(decorationTypes(decorationIndex)))
+        case 'colorbar'
+            manualLocation = 'manual';
+
+        case 'legend'
+            manualLocation = 'none';
+
+        otherwise
+            continue;
+    end
+
+    try
+        decorationHandle.Location = manualLocation;
+    catch exception
+        error('exportFigure2PDF:ManualDecorationPlacementFailed', ...
+            'Could not set %s placement to manual: %s', ...
+            char(decorationTypes(decorationIndex)), ...
+            exception.message);
+    end
+end
+
+end
+
+
+function local_setDecorationPositionBoxes_( ...
+        decorationHandles, positionBoxesPx, figHandle)
+%LOCAL_SETDECORATIONPOSITIONBOXES_ Apply figure-relative decoration boxes.
+
+arguments
+    decorationHandles
+    positionBoxesPx (:,4) double
+    figHandle (1,1) matlab.ui.Figure
+end
+
+if size(positionBoxesPx, 1) ~= numel(decorationHandles)
+    error('exportFigure2PDF:DecorationPositionCountMismatch', ...
+        'The number of decoration boxes does not match the handles.');
+end
+
+for decorationIndex = 1:numel(decorationHandles)
+    local_setAbsolutePositionBox_( ...
+        decorationHandles(decorationIndex), ...
+        positionBoxesPx(decorationIndex, :), ...
+        figHandle);
+end
+
+end
+
+
+function transformedBoxesPx = local_transformPositionBoxes_( ...
+        positionBoxesPx, currentBoundaryPx, targetBoundaryPx, scaleFactor)
+%LOCAL_TRANSFORMPOSITIONBOXES_ Apply one affine transform to rectangles.
+
+arguments
+    positionBoxesPx (:,4) double
+    currentBoundaryPx (1,4) double
+    targetBoundaryPx (1,4) double
+    scaleFactor (1,2) double
+end
+
+transformedBoxesPx = positionBoxesPx;
+
+if isempty(positionBoxesPx)
+    return;
+end
+
+transformedBoxesPx(:, 1) = ...
+    targetBoundaryPx(1) + ...
+    (positionBoxesPx(:, 1) - currentBoundaryPx(1)) * scaleFactor(1);
+
+transformedBoxesPx(:, 2) = ...
+    targetBoundaryPx(2) + ...
+    (positionBoxesPx(:, 2) - currentBoundaryPx(2)) * scaleFactor(2);
+
+transformedBoxesPx(:, 3) = ...
+    positionBoxesPx(:, 3) * scaleFactor(1);
+
+transformedBoxesPx(:, 4) = ...
+    positionBoxesPx(:, 4) * scaleFactor(2);
+
+end
+
 
 function local_setAbsolutePositionBox_( ...
     objectHandle, targetBoxPx, figHandle)
@@ -732,5 +1148,18 @@ tf = ...
     all(isfinite(box)) && ...
     box(3) > 0 && ...
     box(4) > 0;
+
+end
+
+
+function local_cleanupTempFigure_(figHandle, keepOpen)
+%LOCAL_CLEANTEMPFIGURE_ Delete the temporary figure unless debugging.
+%
+% The callback is invoked when the onCleanup object is cleared or destroyed.
+% In debug mode the copied figure is intentionally retained for inspection.
+
+if ~keepOpen && isgraphics(figHandle)
+    delete(figHandle);
+end
 
 end
