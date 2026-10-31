@@ -117,15 +117,20 @@ if mu.OptionState.create(opts.icaOpt).toLogical && nargout >= 4
     else
         fprintf("\nICA result does not exist. Performing ICA on data...\n\n");
         channels = 1:size(trialsEEG{1}, 1);
-        Fig = mu_plotWaveArray(struct("chMean", mu.calchMean(trialsEEG), "chErr", mu.calchStd(trialsEEG)), window);
-        mu.addTitle(Fig, "Original");
-        mu.scaleAxes(Fig, "y", [-20, 20], "symOpts", "max");
-        bc = validateinput(sprintf('Input extra bad channels (besides [%s]): ', strjoin(string(badChs), ', ')), ...
-                           @(x) isempty(x) || all(fix(x) == x & x > 0));
-        badChs = [badChs(:); bc(:)]';
-        if isvalid(Fig)
-            close(Fig);
+        if isfield(opts, 'autoMode') && opts.autoMode
+            % headless: no preview figure, no interactive bad-channel prompt
+            bc = [];
+        else
+            Fig = mu_plotWaveArray(struct("chMean", mu.calchMean(trialsEEG), "chErr", mu.calchStd(trialsEEG)), window);
+            mu.addTitle(Fig, "Original");
+            mu.scaleAxes(Fig, "y", [-20, 20], "symOpts", "max");
+            bc = validateinput(sprintf('Input extra bad channels (besides [%s]): ', strjoin(string(badChs), ', ')), ...
+                               @(x) isempty(x) || all(fix(x) == x & x > 0));
+            if isvalid(Fig)
+                close(Fig);
+            end
         end
+        badChs = [badChs(:); bc(:)]';
 
         % first trial exclusion
         tIdx = mu_excludeTrials(trialsEEG, 0.4, 20, "userDefineOpt", "off", "badCHs", badChs);

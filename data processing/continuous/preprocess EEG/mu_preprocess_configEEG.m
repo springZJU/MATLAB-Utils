@@ -42,6 +42,8 @@ opts.sameICAOpt = "off"; % If set "on", apply the ICA result of one
                          % protocol to the others for one subject
 opts.icaICs = []; % If non-empty, skip the interactive IC selection and
                   % reconstruct with exactly these ICs (e.g. [1 3 5:20])
+opts.autoMode = false; % If true, skip ALL interactive prompts (bad channel
+                       % input, IC selection) so the export can run headless
 
 % for motion sensor
 opts.load_speed = true;
