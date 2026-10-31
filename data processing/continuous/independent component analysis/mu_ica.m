@@ -42,14 +42,11 @@ badChs = channels(~ismember(channels, chs2doICA));
 %% Perform ICA
 comp = mu_ica_impl(trialsData, windowICA, fs, "chs2doICA", chs2doICA, "Method", mIp.Results.Method);
 
-% Rescale ICs to the historical convention (IC time course in uV, topo in uV):
-% newer FieldTrip returns a unit-normalised topo (~0.2) which no longer matches
-% the topo stored in old [ICA res.mat] files (~tens of uV). topo*unmixing == I
-% is preserved by this rescaling, so reconstruction is unchanged.
-icAll = cat(2, comp.trial{:});
-s_ic  = std(icAll, [], 2);
-comp.topo     = comp.topo .* s_ic';
-comp.unmixing = comp.unmixing ./ s_ic;
+% NOTE: newer FieldTrip returns a unit-normalised topo (~0.1-0.2), whereas the
+% historical [ICA res.mat] files store a topo of tens of uV. The two differ only
+% by a per-IC scale factor (topo*unmixing == I in both cases), so reconstruction
+% is unaffected. No rescaling is applied here to keep this function's output
+% identical to the FieldTrip result.
 
 %% Plot ICA result
 ICsRequested = mIp.Results.ICs;
