@@ -40,7 +40,7 @@ end
 badChs = channels(~ismember(channels, chs2doICA));
 
 %% Perform ICA
-comp = mu_ica_impl(trialsData, windowICA, fs, varargin{:});
+comp = mu_ica_impl(trialsData, windowICA, fs, "chs2doICA", chs2doICA, "Method", mIp.Results.Method);
 
 %% Plot ICA result
 ICsRequested = mIp.Results.ICs;
