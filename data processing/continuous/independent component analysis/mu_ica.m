@@ -22,7 +22,7 @@ mIp.addRequired("fs", @(x) validateattributes(x, 'numeric', {'scalar', 'positive
 mIp.addRequired("topo");
 mIp.addOptional("chs2doICA", 'all');
 mIp.addParameter("Method", 'runica', @(x) any(validatestring(x, {'runica', 'fastica'})));
-mIp.addParameter("ICs", [], @(x) isempty(x) || validateattributes(x, {'numeric'}, {'vector', 'positive', 'integer'}));
+mIp.addParameter("ICs", [], @(x) isempty(x) || (isnumeric(x) && isvector(x) && all(x > 0) && all(fix(x) == x)));
 mIp.parse(trialsData, windowICA, fs, topo, varargin{:});
 
 [nch, ~] = mu.checkdata(trialsData);
