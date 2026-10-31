@@ -40,6 +40,8 @@ opts.windowICA = opts.window;
 opts.nMaxIcaTrial = 100; % If left empty, use all trials
 opts.sameICAOpt = "off"; % If set "on", apply the ICA result of one 
                          % protocol to the others for one subject
+opts.icaICs = []; % If non-empty, skip the interactive IC selection and
+                  % reconstruct with exactly these ICs (e.g. [1 3 5:20])
 
 % for motion sensor
 opts.load_speed = true;
