@@ -24,6 +24,8 @@ mIp.addOptional("chs2doICA", 'all');
 mIp.addParameter("Method", 'runica', @(x) any(validatestring(x, {'runica', 'fastica'})));
 mIp.addParameter("ICs", [], @(x) isempty(x) || (isnumeric(x) && isvector(x) && all(x > 0) && all(fix(x) == x)));
 mIp.addParameter("autoModel", "", @(x) isempty(x) || ischar(x) || isstring(x));
+mIp.addParameter("autoRule", "thr", @(x) any(validatestring(x, {'k', 'thr'})));
+mIp.addParameter("autoThr", 0.5, @(x) isnumeric(x) && isscalar(x) && x >= 0 && x <= 1);
 mIp.parse(trialsData, windowICA, fs, topo, varargin{:});
 
 [nch, ~] = mu.checkdata(trialsData);
@@ -55,7 +57,8 @@ autoModel = string(mIp.Results.autoModel);
 
 if isempty(ICsRequested) && strlength(autoModel) > 0
     % ---- automatic mode: predict the ICs to remove, no plotting / no prompt ----
-    [keepAuto, pAuto] = mu.icaAutoSelect(comp, topo, windowICA, autoModel);
+    [keepAuto, pAuto] = mu.icaAutoSelect(comp, topo, windowICA, autoModel, ...
+        mIp.Results.autoRule, mIp.Results.autoThr);
     ICs = keepAuto;
     fprintf('[mu_ica] auto-selected: keep %d/%d ICs %s (removed %s)\n', ...
         numel(keepAuto), numel(pAuto), mat2str(keepAuto), ...

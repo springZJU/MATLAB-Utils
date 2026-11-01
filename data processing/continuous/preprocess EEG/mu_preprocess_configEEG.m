@@ -47,6 +47,8 @@ opts.autoMode = false; % If true, skip ALL interactive prompts (bad channel
 opts.autoICSelect = false; % If true and icaICs is empty, let the trained model
                            % (mu.icaAutoSelect) pick the ICs to remove
 opts.autoICModel = 'D:\NeuroAgent\runs\ica_hist\model_all.mat'; % model file
+opts.autoICRule = "thr"; % "thr" = remove ICs with p >= autoICThr; "k" = top round(sum(p))
+opts.autoICThr = 0.5; % probability threshold for autoICRule = "thr"
 
 % for motion sensor
 opts.load_speed = true;

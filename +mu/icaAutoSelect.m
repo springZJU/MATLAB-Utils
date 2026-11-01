@@ -1,18 +1,21 @@
-function [keep, p, k] = icaAutoSelect(comp, topoInfo, windowICA, modelPath)
+function [keep, p, k] = icaAutoSelect(comp, topoInfo, windowICA, modelPath, rule, thr)
 %ICA_AUTOSELECT  Predict which ICA components to remove, using the trained model.
 %
-%   keep = mu.icaAutoSelect(comp, topoInfo, windowICA, modelPath)
+%   keep = mu.icaAutoSelect(comp, topoInfo, windowICA, modelPath, rule, thr)
 %
 %   The model was trained on 108 historical recordings (labels taken from the
 %   stored comp.ICs) plus 13 manually labelled recordings (n = 3868 ICs).
-%   Decision rule: k = round(sum(p)), i.e. the expected number of removals,
-%   then keep everything outside the k highest-probability components.
+%   Two decision rules are available:
+%     rule = "k"   : k = round(sum(p)) components with the highest p are removed
+%     rule = "thr" : every component with p >= thr is removed (default, conservative)
 %
 % Input:
 %   comp      : FieldTrip component struct WITH comp.trial (IC time courses)
 %   topoInfo  : EEGPos struct (for the frontal-channel fraction) or [] / array
 %   windowICA : [start, end] in ms
 %   modelPath : path to model_all.mat (default: D:\NeuroAgent\runs\ica_hist\model_all.mat)
+%   rule      : "k" or "thr" (default "thr")
+%   thr       : probability threshold for rule "thr" (default 0.5)
 %
 % Output:
 %   keep : row vector of IC indices to KEEP
@@ -22,6 +25,9 @@ function [keep, p, k] = icaAutoSelect(comp, topoInfo, windowICA, modelPath)
 if nargin < 4 || isempty(modelPath)
     modelPath = 'D:\NeuroAgent\runs\ica_hist\model_all.mat';
 end
+if nargin < 5 || isempty(rule), rule = "thr"; end
+if nargin < 6 || isempty(thr),  thr  = 0.5;   end
+rule = validatestring(rule, {'k', 'thr'});
 if ~isfile(modelPath)
     error('mu:icaAutoSelect:noModel', 'model file not found: %s', modelPath);
 end
@@ -90,8 +96,13 @@ Xz = (X - M.muX) ./ M.sdX;
 [~, sc] = predict(M.rf, Xz);
 p = sc(:, 2);
 
-k = max(1, min(nIC, round(sum(p))));
-[~, ord] = sort(p, 'descend');
-remove = sort(ord(1:k))';
+if strcmp(rule, "k")
+    k = max(1, min(nIC, round(sum(p))));
+    [~, ord] = sort(p, 'descend');
+    remove = sort(ord(1:k))';
+else
+    remove = find(p >= thr)';
+    k = numel(remove);
+end
 keep = setdiff(1:nIC, remove);
 end
