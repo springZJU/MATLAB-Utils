@@ -178,6 +178,22 @@ if mu.OptionState.create(opts.icaOpt).toLogical && nargout >= 4
     trialsEEG = cellfun(@(x) mu.insertrows(x, badChs), trialsEEG, "UniformOutput", false);
     trialsEEG = mu_interpolateBadChannels(trialsEEG, badChs, EEGPos.neighbours);
 
+    % detect flat ("dead") channels that were never flagged as bad: their std is
+    % ~0 uV, so they silently drag down averages and distort ICA topographies.
+    if isfield(opts, 'detectBadChs') && opts.detectBadChs
+        Xall = cat(2, trialsEEG{:});
+        sCh  = std(Xall, 0, 2);
+        dead = find(sCh < opts.badChThreshold)';
+        dead = setdiff(dead, badChs);
+        if ~isempty(dead)
+            nbs = mu.neuracle32Neighbours();
+            trialsEEG = mu_interpolateBadChannels(trialsEEG, dead, nbs);
+            badChs = sort(union(badChs, dead), "ascend");
+            fprintf('\n[preprocess] flat channels detected and interpolated: %s\n', ...
+                strjoin(string(EEGPos.channelNames(dead)), ', '));
+        end
+    end
+
     comp.channels = channels;
     comp.ICs = ICs;
     comp.badChs = sort(badChs, "ascend");

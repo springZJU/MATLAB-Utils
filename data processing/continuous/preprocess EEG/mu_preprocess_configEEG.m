@@ -49,6 +49,9 @@ opts.autoICSelect = false; % If true and icaICs is empty, let the trained model
 opts.autoICModel = 'D:\NeuroAgent\runs\ica_hist\model_all.mat'; % model file
 opts.autoICRule = "thr"; % "thr" = remove ICs with p >= autoICThr; "k" = top round(sum(p))
 opts.autoICThr = 0.5; % probability threshold for autoICRule = "thr"
+opts.detectBadChs = true; % flag channels whose std is ~0 (dead electrode) and
+                          % interpolate them from anatomical neighbours
+opts.badChThreshold = 1; % uV; channels below this std are treated as dead
 
 % for motion sensor
 opts.load_speed = true;
