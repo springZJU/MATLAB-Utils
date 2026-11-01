@@ -163,6 +163,9 @@ if mu.OptionState.create(opts.icaOpt).toLogical && nargout >= 4
         temp = mu.cutdata(trialsEEG(idx), window, windowICA);
         if isfield(opts, 'icaICs') && ~isempty(opts.icaICs)
             [comp, ICs] = mu_ica(temp, window, fs, EEGPos, "chs2doICA", channels, "ICs", opts.icaICs);
+        elseif isfield(opts, 'autoICSelect') && opts.autoICSelect
+            [comp, ICs] = mu_ica(temp, window, fs, EEGPos, "chs2doICA", channels, ...
+                "autoModel", opts.autoICModel);
         else
             [comp, ICs] = mu_ica(temp, window, fs, EEGPos, "chs2doICA", channels);
         end

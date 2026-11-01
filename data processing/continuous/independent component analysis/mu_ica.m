@@ -23,6 +23,7 @@ mIp.addRequired("topo");
 mIp.addOptional("chs2doICA", 'all');
 mIp.addParameter("Method", 'runica', @(x) any(validatestring(x, {'runica', 'fastica'})));
 mIp.addParameter("ICs", [], @(x) isempty(x) || (isnumeric(x) && isvector(x) && all(x > 0) && all(fix(x) == x)));
+mIp.addParameter("autoModel", "", @(x) isempty(x) || ischar(x) || isstring(x));
 mIp.parse(trialsData, windowICA, fs, topo, varargin{:});
 
 [nch, ~] = mu.checkdata(trialsData);
@@ -50,8 +51,16 @@ comp = mu_ica_impl(trialsData, windowICA, fs, "chs2doICA", chs2doICA, "Method", 
 
 %% Plot ICA result
 ICsRequested = mIp.Results.ICs;
+autoModel = string(mIp.Results.autoModel);
 
-if isempty(ICsRequested)
+if isempty(ICsRequested) && strlength(autoModel) > 0
+    % ---- automatic mode: predict the ICs to remove, no plotting / no prompt ----
+    [keepAuto, pAuto] = mu.icaAutoSelect(comp, topo, windowICA, autoModel);
+    ICs = keepAuto;
+    fprintf('[mu_ica] auto-selected: keep %d/%d ICs %s (removed %s)\n', ...
+        numel(keepAuto), numel(pAuto), mat2str(keepAuto), ...
+        mat2str(setdiff(1:numel(pAuto), keepAuto)));
+elseif isempty(ICsRequested)
     % ---- interactive mode (original behaviour) ----
     % IC Wave
     mu_plotWaveArray(struct("chMean", mu.calchMean(comp.trial), "chErr", mu.calchStd(comp.trial)), windowICA);

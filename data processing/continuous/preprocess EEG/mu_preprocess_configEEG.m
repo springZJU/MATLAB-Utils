@@ -44,6 +44,9 @@ opts.icaICs = []; % If non-empty, skip the interactive IC selection and
                   % reconstruct with exactly these ICs (e.g. [1 3 5:20])
 opts.autoMode = false; % If true, skip ALL interactive prompts (bad channel
                        % input, IC selection) so the export can run headless
+opts.autoICSelect = false; % If true and icaICs is empty, let the trained model
+                           % (mu.icaAutoSelect) pick the ICs to remove
+opts.autoICModel = 'D:\NeuroAgent\runs\ica_hist\model_all.mat'; % model file
 
 % for motion sensor
 opts.load_speed = true;
