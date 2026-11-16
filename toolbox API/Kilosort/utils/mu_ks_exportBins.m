@@ -9,9 +9,9 @@ nBatch = numel(params);
 for rIndex = 1:nBatch
     % Convert data to bin files
     BLOCKPATHs = cellstr(params(rIndex).BLOCKPATH);
-    try
-        DATAPATHs = cellstr(params(rIndex).datPath);
-    end
+    % P1-2: SPR tables store datPath, GFJ 38-column tables do not; use the
+    % fallback helper instead of a bare field access (see mu.getDatPath)
+    DATAPATHs = cellstr(mu.getDatPath(params(rIndex)));
     recTech = params(rIndex).recTech;
 
     % normalize paths
