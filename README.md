@@ -38,6 +38,8 @@ updateMATLABUtils
 | `mu.boxplot` | Draw highly customizable grouped boxplots with control over error type, center line, raw data points, outliers, colors, and spacing. |
 | `mu.colorbar` | Create a colorbar outside a tight-positioned axes layout. |
 | `mu.copyaxes` | Copy plotted content from one axes to another, useful when source and target axes have different sizes. |
+| `mu.copyobj` | Copy the children of one graphics container into another, preserving the target container's own Position/OuterPosition/Layout. |
+| `mu.getContentBox` | Measure Position or TightInset content boxes through layout roots; used by `mu.exportFigure2PDF`. |
 | `mu.dashline` | Draw dashed curves by segmenting polylines in data-space arc length instead of relying on MATLAB line style. |
 | `mu.dotplot` | Draw dot or swarm plots with optional spread interval, center line, confidence interval, links between paired groups, and horizontal or vertical orientation. |
 | `mu.genColormap` | Generate a diverging colormap with white or a light color near the center. |
@@ -75,6 +77,7 @@ updateMATLABUtils
 | `mu.parsestruct` | Parse fields of a struct and assign them as variables in the caller workspace. |
 | `mu.struct2nv` | Convert a struct into name-value pairs. |
 | `mu.structcat` | Concatenate struct arrays while handling missing or conflicting fields. |
+| `mu.validatestruct` | Validate each field of a struct vector and report `sIndex - fieldName: message` on failure. |
 
 #### 2.2 Cell utilities
 
@@ -84,6 +87,7 @@ updateMATLABUtils
 | `mu.cellcat` | Concatenate the contents of a cell array along a specified dimension. |
 | `mu.parcellfun` | Parallel version of `cellfun`. |
 | `mu.reslice` | Re-slice a cell array of multidimensional arrays along a selected dimension. |
+| `mu.uniquecell` | Unique sets and set filtering for cell arrays of numeric vectors (`simple` / `largest set` / `minimum set`). |
 
 #### 2.3 Matrix and numeric utilities
 
@@ -99,12 +103,14 @@ updateMATLABUtils
 | `mu.min` | Return minimum values of time-series data and corresponding time points. |
 | `mu.nchoosek` | Extended combination helper based on `nchoosek`. |
 | `mu.numstrcat` | Concatenate numeric values into formatted strings. |
-| `mu.perms` | Return all possible k-element permutations from N elements. |
+| `mu.perms` | Return all possible k-element permutations from N elements (rows grouped by combination). |
 | `mu.replaceval` | Replace scalar values that match specified values or satisfy condition functions. |
 | `mu.replacevalMat` | Matrix-specific helper equivalent to `X(X == oldVal) = newVal`. |
 | `mu.shiftmatrix` | Shift a 2-D matrix left-right or up-down and pad missing values by a chosen method. |
 | `mu.shortest_k_subseq` | Find the shortest subsequence satisfying a k-related criterion. |
 | `mu.slicemat` | Return `A(:,...,idx,...,:)` along a specified dimension. |
+| `mu.tuples` | Generate all possible k-tuples over a vector (`N^k`-by-`k`). |
+| `mu.isapprox` | Test approximate equality of two arrays within absolute/relative tolerance, with optional `EqualNaN`. |
 
 #### 2.4 String, path, and function-handle utilities
 
@@ -116,6 +122,7 @@ updateMATLABUtils
 | `mu.isTextScalar` | Test whether input is a scalar string or char. |
 | `mu.obtainArgoutN` | Return selected output arguments from a function call. |
 | `mu.path2func` | Convert a full `.m` file path into a function handle. |
+| `mu.dir` | List files like `dir` and also return a cell array of full paths, including recursive wildcard matches. |
 
 #### 2.5 Function application and parallel helpers
 
@@ -243,6 +250,7 @@ updateMATLABUtils
 |---|---|
 | `mu_ica` | Perform ICA on trial data. |
 | `mu_ica_reconstructData` | Reconstruct trial data after removing selected independent components. |
+| `mu.icaAutoSelect` | Predict which ICA components to remove using the trained model (`rule` = `"thr"` or `"k"`). |
 
 #### 4.6 Granger causality and spatial statistics
 
@@ -269,6 +277,18 @@ updateMATLABUtils
 |---|---|
 | `mu_GFP` | Compute global field power for EEG or multichannel field-potential data. |
 | `mu_cbpt` | Perform cluster-based permutation testing on trial data. |
+
+#### 4.9 Data integrity, path, and montage helpers
+
+| Function | Purpose |
+|---|---|
+| `mu.bdfNbchan` | Number of signal channels declared in a BDF/EDF file header; use it instead of hard-coding channel counts. |
+| `mu.neuracleBadChs` | Non-EEG (auxiliary) channels of a Neuracle recording, derived from the channel count. |
+| `mu.neuracle32Neighbours` | Anatomical neighbours for the Neuracle 32-channel montage, usable with `mu_interpolateBadChannels`. |
+| `mu.tdtDuration` | Real recording duration of a TDT block in seconds; `data.info.duration` is a datestr, not seconds. |
+| `mu.sevCheck` | Structural integrity check for the `.sev` files of a TDT block (truncated files silently corrupt fs and sample counts). |
+| `mu.binPath` | Canonical location of an exported binary: `<tank>\BIN\<Block-N>_<store>.bin`, with a legacy flag for historical `<block>\Wave.bin`. |
+| `mu.getDatPath` | Raw-data path of one Excel row or metadata struct, resolved as `datPath -> dataPath -> soundPath`. |
 
 ### 5. Spike-data processing
 
