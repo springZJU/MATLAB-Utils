@@ -40,10 +40,6 @@ function varargout = mu_plotTFR(data, f, windowData, varargin)
 %        to [GridSize] and for subplot to skip, use NAN value.
 %        numel(Channels)<prod(GridSize) is okay. The last several subplots
 %        are hided. numel(Channels)>prod(GridSize) reports an error.
-%
-%   - 'margings': [left,right,bottom,top] (default=[.01, .03, .01, .01])
-%   - 'paddings': [left,right,bottom,top] (default=[.05, .05, .1, .1])
-%        See `mu.subplot` for detail.
 % 
 %--------------------------------------------------------------------------------
 % OUTPUT
@@ -57,8 +53,6 @@ mIp.addParameter("fLimits", [], @(x) validateattributes(x, 'numeric', {'numel', 
 mIp.addParameter("coi", 'auto');
 mIp.addParameter("GridSize", [], @(x) validateattributes(x, 'numeric', {'numel', 2, 'positive'}));
 mIp.addParameter("Channels", [], @(x) validateattributes(x, 'numeric', {'2d'}));
-mIp.addParameter("margins",  [.01, .03, .01, .01], @(x) validateattributes(x, 'numeric', {'numel', 4}));
-mIp.addParameter("paddings", [.05, .05, .1, .1], @(x) validateattributes(x, 'numeric', {'numel', 4}));
 
 mIp.parse(f, windowData, varargin{:});
 
@@ -66,8 +60,6 @@ GridSize = mIp.Results.GridSize;
 Channels = mIp.Results.Channels;
 coi0 = mIp.Results.coi;
 fLimits = mIp.Results.fLimits;
-margins = mIp.Results.margins;
-paddings = mIp.Results.paddings;
 
 f_c = 0.8125; % morlet wavelet center frequency
 
@@ -177,6 +169,10 @@ Channels(Channels > nch) = nan;
 
 % plot
 Fig = figure("WindowState", "maximized");
+tl = mu.tiledlayout(Fig, GridSize(1), GridSize(2), ...
+    "margins", zeros(1, 4), ...
+    "paddings", [0, 0.02, 0, 0]);
+
 for rIndex = 1:GridSize(1)
 
     for cIndex = 1:GridSize(2)
@@ -186,8 +182,9 @@ for rIndex = 1:GridSize(1)
             continue;
         end
 
-        ax = mu.subplot(Fig, GridSize(1), GridSize(2), (rIndex - 1) * GridSize(2) + cIndex, ...
-                        "margins", margins, "paddings", paddings);
+        subIndex = (rIndex - 1) * GridSize(2) + cIndex;
+
+        ax = mu.subplot(tl, subIndex);
         imagesc(ax, "XData", t, ...
                     "YData", f, ...
                     "CData", squeeze(cwtres(ch, :, :)));
@@ -215,7 +212,7 @@ colorbar('position', [min(max(temp(:, 1)) + temp(1, 3) + 0.005, 0.97), 0.1, 0.01
 mu.scaleAxes(Fig, "c");
 
 if ~isempty(coi)
-    mu.addLines(struct("X", t, "Y", coi, "color", "w", "style", "--", "width", 0.6));
+    mu.addLines(struct("X", t, "Y", coi, "color", "w", "linestyle", "--", "linewidth", 0.6));
 end
 
 if nargout == 1
