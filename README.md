@@ -174,6 +174,7 @@ updateMATLABUtils
 | `mu.ttest2` | Wrapper around independent-samples t-test with unified output format. |
 | `mu.signrank` | Wrapper around Wilcoxon signed-rank test with unified output format. |
 | `mu.ranksum` | Wrapper around Mann-Whitney U or rank-sum test with unified output format. |
+| `mu.bootstrp` | Bootstrap resampling over trials with optional private RNG stream and percentile CI. |
 | `mu.prepareANOVA` | Prepare data and grouping variables for ANOVA. |
 | `mu.histcounts` | Calculate histogram counts for overlapping bins. |
 | `mu.fisherstat` | Combine p-values using Fisher's method. |
@@ -194,6 +195,7 @@ updateMATLABUtils
 | Function | Purpose |
 |---|---|
 | `mu.exportFigure2PDF` | Export a MATLAB figure to PDF with specified width and height in millimeters. |
+| `mu.exportBoth` | Export a figure to PDF (mm-exact, via `mu.exportFigure2PDF`) plus a raster copy (jpg/png/fig) in one call; accepts a path with or without extension. |
 | `mu.exportgraphics` | Extended `exportgraphics` supporting axes arrays and overlapped axes. |
 | `mu.load` | Load variables while skipping loading if variables already exist in the workspace. |
 | `mu.print` | Print or export figures while skipping existing files. |
@@ -297,6 +299,9 @@ updateMATLABUtils
 | `mu_selectSpikes` | Extract spike times or spike trains aligned to trial events. |
 | `mu_calFR` | Calculate firing rate from spike data. |
 | `mu_calLatency` | Estimate response latency from spike responses. |
+| `mu.calLatencyDual` | Response latency with automatic upward/downward detection (Poisson criterion). |
+| `mu.isOnsetResp` | Onset-response flag (H_on): per-condition one-tailed t-test + minimum FR, all/any rule. |
+| `mu.isChangeResp` | Change-response flag (H_change): bootstrap of FR difference + latency + minimum spikes. |
 | `mu_calPSTH` | Calculate peri-stimulus time histograms. |
 | `mu_plotFRA` | Plot frequency-response-area results. |
 | `mu_plotRaster` | Plot spike rasters. |
